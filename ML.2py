@@ -1,0 +1,139 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from xgboost import XGBRegressor
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.decomposition import PCA
+import numpy as np
+
+# Load data
+data = pd.read_csv('C:/Users/98933/Desktop/cryptocompare_data.csv')
+
+# Convert date to datetime
+data['date'] = pd.to_datetime(data['date'])
+
+# Extract year, month, day, and day of week
+data['Year'] = data['date'].dt.year
+data['Month'] = data['date'].dt.month
+data['Day'] = data['date'].dt.day
+data['DayOfWeek'] = data['date'].dt.dayofweek
+
+# Drop date column
+data = data.drop('date', axis=1)
+
+# Replace infinity with NaN
+data = data.replace([np.inf, -np.inf], np.nan)
+
+# Fill NaN values with mean
+data = data.fillna(data.mean())
+
+# Apply PCA to reduce the number of features
+n_components = min(10, data.drop('close', axis=1).shape[1])  # Choose the smaller value between 10 and the number of features
+pca = PCA(n_components=n_components)
+data_pca = pca.fit_transform(data.drop('close', axis=1))
+
+# Split data into training and testing sets
+# The last 500 samples are used for testing
+X_train, X_test = data_pca[:-500], data_pca[-500:]
+y_train, y_test = data['close'][:-500], data['close'][-500:]
+
+# Define model
+model = XGBRegressor(n_jobs=-1)
+
+# Define parameters for RandomizedSearchCV
+parameters = {'n_estimators': [50, 100, 150], 'max_depth': [None, 5, 10], 'min_samples_split': [2, 5, 10]}
+
+# Use RandomizedSearchCV to find the best parameters
+random_search = RandomizedSearchCV(estimator=model, param_distributions=parameters, cv=3, scoring='neg_mean_squared_error', n_jobs=-1)
+random_search.fit(X_train, y_train)
+
+# Train model with best parameters
+best_model = random_search.best_estimator_
+best_model.fit(X_train, y_train)
+
+# Predict prices
+y_pred = best_model.predict(X_test)
+
+# Calculate RMSE
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+
+print(f'RMSE: {rmse}')
+
+# Create a new DataFrame for predictions
+predictions = pd.DataFrame(index=y_test.index)
+predictions['actual'] = y_test
+predictions['predicted'] = y_pred
+
+# Classify the actual and predicted prices as 'Up' or 'Down'
+predictions['actual_direction'] = np.where(predictions['actual'].shift(-1) > predictions['actual'], 'Up', 'Down')
+predictions['predicted_direction'] = np.where(predictions['predicted'].shift(-1) > predictions['predicted'], 'Up', 'Down')
+
+# Calculate the number of correct predictions
+correct_predictions = (predictions['actual_direction'] == predictions['predicted_direction']).sum()
+
+# Calculate the total number of predictions
+total_predictions = predictions.shape[0]
+
+# Calculate the number of correct 'Up' predictions
+correct_up_predictions = ((predictions['actual_direction'] == 'Up') & (predictions['predicted_direction'] == 'Up')).sum()
+
+# Calculate the number of correct 'Down' predictions
+correct_down_predictions = ((predictions['actual_direction'] == 'Down') & (predictions['predicted_direction'] == 'Down')).sum()
+
+# Print the results
+print(f'Total predictions: {total_predictions}')
+print(f'Correct predictions: {correct_predictions}')
+print(f'Correct "Up" predictions: {correct_up_predictions}')
+print(f'Correct "Down" predictions: {correct_down_predictions}')
+
+# Save the predictions to a CSV file
+predictions.to_csv('C:/Users/98933/Desktop/predictions.csv')
+
+# Load test data
+test_data = pd.read_csv('C:/Users/98933/Desktop/test.csv')
+
+# Apply the same transformations to the test data
+test_data['date'] = pd.to_datetime(test_data['date'])
+test_data['Year'] = test_data['date'].dt.year
+test_data['Month'] = test_data['date'].dt.month
+test_data['Day'] = test_data['date'].dt.day
+test_data['DayOfWeek'] = test_data['date'].dt.dayofweek
+test_data = test_data.drop('date', axis=1)
+test_data = test_data.replace([np.inf, -np.inf], np.nan)
+test_data = test_data.fillna(test_data.mean())
+
+# Apply PCA to the test data
+test_data_pca = pca.transform(test_data.drop('close', axis=1))
+
+# Use the trained model to predict prices for the test data
+y_test_pred = best_model.predict(test_data_pca)
+
+# Create a new DataFrame for test predictions
+test_predictions = pd.DataFrame(index=test_data.index)
+test_predictions['actual'] = test_data['close']
+test_predictions['predicted'] = y_test_pred
+
+# Classify the actual and predicted prices as 'Up' or 'Down'
+test_predictions['actual_direction'] = np.where(test_predictions['actual'].shift(-1) > test_predictions['actual'], 'Up', 'Down')
+test_predictions['predicted_direction'] = np.where(test_predictions['predicted'].shift(-1) > test_predictions['predicted'], 'Up', 'Down')
+
+# Calculate the number of correct predictions
+correct_test_predictions = (test_predictions['actual_direction'] == test_predictions['predicted_direction']).sum()
+
+# Calculate the total number of predictions
+total_test_predictions = test_predictions.shape[0]
+
+# Calculate the number of correct 'Up' predictions
+correct_up_test_predictions = ((test_predictions['actual_direction'] == 'Up') & (test_predictions['predicted_direction'] == 'Up')).sum()
+
+# Calculate the number of correct 'Down' predictions
+correct_down_test_predictions = ((test_predictions['actual_direction'] == 'Down') & (test_predictions['predicted_direction'] == 'Down')).sum()
+
+# Print the results
+print(f'Total test predictions: {total_test_predictions}')
+print(f'Correct test predictions: {correct_test_predictions}')
+print(f'Correct "Up" test predictions: {correct_up_test_predictions}')
+print(f'Correct "Down" test predictions: {correct_down_test_predictions}')
+
+# Save the test predictions to a CSV file
+test_predictions.to_csv('C:/Users/98933/Desktop/test_predictions.csv')
